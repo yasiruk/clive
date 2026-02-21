@@ -55,15 +55,28 @@ func spawnFFplayView(title string, getNextPacket func() (*rtp.Packet, error)) {
 		defer stdin.Close()
 		defer ivf.Close()
 		defer cmd.Process.Kill()
+
+		frameCount := 0
 		for {
 			pkt, err := getNextPacket()
 			if err != nil {
+				fmt.Printf("[%s] Error reading packet: %v\n", title, err)
 				break
 			}
+
+			frameCount++
+			if frameCount == 1 {
+				fmt.Printf("[%s] Successfully received the FIRST RTP packet! Stream is flowing.\n", title)
+			} else if frameCount%150 == 0 {
+				fmt.Printf("[%s] Stream active: received %d packets so far...\n", title, frameCount)
+			}
+
 			if err := ivf.WriteRTP(pkt); err != nil {
+				fmt.Printf("[%s] Error writing RTP to IVF container: %v\n", title, err)
 				break
 			}
 		}
+		fmt.Printf("[%s] Video stream processing loop ended.\n", title)
 	}()
 }
 
@@ -203,12 +216,13 @@ func main() {
 		if track.Kind() == webrtc.RTPCodecTypeVideo {
 			fmt.Println("Spawning window for remote video feed...")
 
-			// Request a keyframe (PLI) every 3 seconds to ensure ffplay starts decoding
+			// Request a keyframe (PLI) periodically to ensure ffplay starts decoding
 			go func() {
 				ticker := time.NewTicker(time.Second * 3)
 				for range ticker.C {
+					fmt.Printf("[Remote Video] Requesting Keyframe (PLI) for SSRC %d...\n", track.SSRC())
 					if rtcpErr := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(track.SSRC())}}); rtcpErr != nil {
-						fmt.Println("Failed to send PLI:", rtcpErr)
+						fmt.Printf("[Remote Video] Failed to send PLI: %v\n", rtcpErr)
 						return
 					}
 				}
