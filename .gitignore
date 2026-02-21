@@ -8,6 +8,7 @@
 /signaling
 /clive-cli
 /signaling-server
+/clive-controller
 
 # Test binary, built with `go test -c`
 *.test
