@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"sync"
 	"syscall"
 
 	"github.com/gorilla/websocket"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media/ivfwriter"
 
 	"github.com/pion/mediadevices"
 	"github.com/pion/mediadevices/pkg/codec/opus"
@@ -25,6 +28,40 @@ import (
 type Message struct {
 	Type string          `json:"type"`
 	Data json.RawMessage `json:"data"`
+}
+
+func spawnFFplayView(title string, getNextPacket func() (*rtp.Packet, error)) {
+	cmd := exec.Command("ffplay", "-i", "pipe:0", "-window_title", title, "-loglevel", "error")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		fmt.Println("Failed to create stdin pipe for ffplay:", err)
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		fmt.Println("Failed to start ffplay (is ffmpeg installed?):", err)
+		return
+	}
+
+	ivf, err := ivfwriter.NewWith(stdin)
+	if err != nil {
+		fmt.Println("Failed to create IVF writer:", err)
+		return
+	}
+
+	go func() {
+		defer stdin.Close()
+		defer ivf.Close()
+		defer cmd.Process.Kill()
+		for {
+			pkt, err := getNextPacket()
+			if err != nil {
+				break
+			}
+			if err := ivf.WriteRTP(pkt); err != nil {
+				break
+			}
+		}
+	}()
 }
 
 func main() {
@@ -125,22 +162,59 @@ func main() {
 				log.Fatalf("Failed to add track: %v\n", err)
 			}
 			fmt.Printf("Added local track: %s\n", track.Kind().String())
+
+			// Capture and show local video feed using ffplay
+			if track.Kind() == webrtc.RTPCodecTypeVideo {
+				if vt, ok := track.(*mediadevices.VideoTrack); ok {
+					reader, err := vt.NewRTPReader(webrtc.MimeTypeVP8, 1234, 1200)
+					if err == nil {
+						var packetBuffer []*rtp.Packet
+						var release func()
+
+						spawnFFplayView("Local Video", func() (*rtp.Packet, error) {
+							if len(packetBuffer) == 0 {
+								if release != nil {
+									release()
+								}
+								pkts, rel, readErr := reader.Read()
+								if readErr != nil {
+									return nil, readErr
+								}
+								packetBuffer = pkts
+								release = rel
+							}
+							pkt := packetBuffer[0]
+							packetBuffer = packetBuffer[1:]
+							return pkt, nil
+						})
+					}
+				}
+			}
 		}
 	}
 
 	// 5. Handle remote tracks
 	peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		fmt.Printf("Received remote track! ID: %s, Kind: %s\n", track.ID(), track.Kind().String())
-		// Basic track handling to keep the connection alive
-		go func() {
-			for {
-				_, _, readErr := track.ReadRTP()
-				if readErr != nil {
-					fmt.Printf("Failed to read from remote track: %v\n", readErr)
-					return
+
+		if track.Kind() == webrtc.RTPCodecTypeVideo {
+			fmt.Println("Spawning window for remote video feed...")
+			spawnFFplayView("Remote Video", func() (*rtp.Packet, error) {
+				pkt, _, readErr := track.ReadRTP()
+				return pkt, readErr
+			})
+		} else {
+			// Basic track handling to keep the connection alive
+			go func() {
+				for {
+					_, _, readErr := track.ReadRTP()
+					if readErr != nil {
+						fmt.Printf("Failed to read from remote track: %v\n", readErr)
+						return
+					}
 				}
-			}
-		}()
+			}()
+		}
 	})
 
 	// 6. Signaling Loop
