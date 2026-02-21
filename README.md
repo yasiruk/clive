@@ -73,19 +73,30 @@ You can now use `curl` from any terminal (or remotely) to control the applicatio
   curl http://localhost:9090/status
   ```
 
-* **Signaling Server:** Start, stop, or get logs.
+* **Signaling Server:** Start, stop, or get logs. You can pass parameters via query params or a JSON body (query params take precedence).
   ```bash
+  # Start with defaults (addr=:8080)
   curl -X POST http://localhost:9090/signaling/start
+
+  # Start with a custom address via query param
+  curl -X POST "http://localhost:9090/signaling/start?addr=:9000"
+
+  # Or via JSON body
+  curl -X POST -H "Content-Type: application/json" -d '{"addr": ":9000"}' http://localhost:9090/signaling/start
+
   curl http://localhost:9090/signaling/logs
   curl -X POST http://localhost:9090/signaling/stop
   ```
 
-* **CLI Client:** Start, stop, or get logs. (You can optionally pass a JSON payload to override default parameters).
+* **CLI Client:** Start, stop, or get logs. You can pass parameters via query params or a JSON body (query params take precedence).
   ```bash
-  # Start the receiver
-  curl -X POST -H "Content-Type: application/json" -d '{"room": "my-room", "server": "localhost:8080", "caller": false}' http://localhost:9090/client/start
-  
-  # Start the caller
+  # Start the receiver with query params
+  curl -X POST "http://localhost:9090/client/start?room=my-room&server=localhost:8080&caller=false"
+
+  # Start the caller with query params
+  curl -X POST "http://localhost:9090/client/start?room=my-room&server=localhost:8080&caller=true"
+
+  # Or use a JSON body
   curl -X POST -H "Content-Type: application/json" -d '{"room": "my-room", "server": "localhost:8080", "caller": true}' http://localhost:9090/client/start
   
   # View recent logs

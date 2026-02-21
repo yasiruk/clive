@@ -110,8 +110,29 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+type SignalingConfig struct {
+	Addr string `json:"addr"`
+}
+
 func startSignalingHandler(w http.ResponseWriter, r *http.Request) {
-	if err := signalingProc.Start("signaling.log", "./signaling-server"); err != nil {
+	config := SignalingConfig{Addr: ":8080"}
+
+	// Parse from JSON body if present
+	if r.Method == http.MethodPost && r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			http.Error(w, fmt.Sprintf("invalid json: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Query params override JSON body
+	if v := r.URL.Query().Get("addr"); v != "" {
+		config.Addr = v
+	}
+
+	args := []string{"-addr", config.Addr}
+
+	if err := signalingProc.Start("signaling.log", "./signaling-server", args...); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -150,6 +171,18 @@ func startClientHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid json: %v", err), http.StatusBadRequest)
 			return
 		}
+	}
+
+	// Query params override JSON body
+	q := r.URL.Query()
+	if v := q.Get("room"); v != "" {
+		config.Room = v
+	}
+	if v := q.Get("server"); v != "" {
+		config.Server = v
+	}
+	if v := q.Get("caller"); v != "" {
+		config.Caller = v == "true" || v == "1"
 	}
 
 	args := []string{
