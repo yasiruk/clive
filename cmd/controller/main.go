@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -16,7 +17,7 @@ type ManagedProcess struct {
 	cmd *exec.Cmd
 }
 
-func (m *ManagedProcess) Start(name string, args ...string) error {
+func (m *ManagedProcess) Start(logFile string, name string, args ...string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -25,22 +26,43 @@ func (m *ManagedProcess) Start(name string, args ...string) error {
 	}
 
 	m.cmd = exec.Command(name, args...)
-	m.cmd.Stdout = os.Stdout
-	m.cmd.Stderr = os.Stderr
+
+	var f *os.File
+	if logFile != "" {
+		var err error
+		f, err = os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err == nil {
+			m.cmd.Stdout = io.MultiWriter(os.Stdout, f)
+			m.cmd.Stderr = io.MultiWriter(os.Stderr, f)
+		} else {
+			log.Printf("Failed to open log file %s: %v", logFile, err)
+			m.cmd.Stdout = os.Stdout
+			m.cmd.Stderr = os.Stderr
+		}
+	} else {
+		m.cmd.Stdout = os.Stdout
+		m.cmd.Stderr = os.Stderr
+	}
 
 	if err := m.cmd.Start(); err != nil {
+		if f != nil {
+			f.Close()
+		}
 		m.cmd = nil
 		return err
 	}
 
-	go func(c *exec.Cmd) {
+	go func(c *exec.Cmd, logF *os.File) {
 		c.Wait()
+		if logF != nil {
+			logF.Close()
+		}
 		m.mu.Lock()
 		if m.cmd == c {
 			m.cmd = nil // Reset when it finishes naturally or gets killed
 		}
 		m.mu.Unlock()
-	}(m.cmd)
+	}(m.cmd, f)
 
 	return nil
 }
@@ -89,7 +111,7 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func startSignalingHandler(w http.ResponseWriter, r *http.Request) {
-	if err := signalingProc.Start("./signaling-server"); err != nil {
+	if err := signalingProc.Start("signaling.log", "./signaling-server"); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -102,6 +124,16 @@ func stopSignalingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Fprintf(w, "Signaling server stopped\n")
+}
+
+func signalingLogsHandler(w http.ResponseWriter, r *http.Request) {
+	out, err := exec.Command("tail", "-n", "100", "signaling.log").CombinedOutput()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("No logs available yet\n"), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write(out)
 }
 
 type ClientConfig struct {
@@ -128,7 +160,7 @@ func startClientHandler(w http.ResponseWriter, r *http.Request) {
 		args = append(args, "-caller")
 	}
 
-	if err := clientProc.Start("./clive-cli", args...); err != nil {
+	if err := clientProc.Start("client.log", "./clive-cli", args...); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -141,6 +173,16 @@ func stopClientHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Fprintf(w, "Client stopped\n")
+}
+
+func clientLogsHandler(w http.ResponseWriter, r *http.Request) {
+	out, err := exec.Command("tail", "-n", "100", "client.log").CombinedOutput()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("No logs available yet\n"), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write(out)
 }
 
 func pullHandler(w http.ResponseWriter, r *http.Request) {
@@ -176,8 +218,10 @@ func main() {
 	http.HandleFunc("/status", statusHandler)
 	http.HandleFunc("/signaling/start", startSignalingHandler)
 	http.HandleFunc("/signaling/stop", stopSignalingHandler)
+	http.HandleFunc("/signaling/logs", signalingLogsHandler)
 	http.HandleFunc("/client/start", startClientHandler)
 	http.HandleFunc("/client/stop", stopClientHandler)
+	http.HandleFunc("/client/logs", clientLogsHandler)
 	http.HandleFunc("/pull", pullHandler)
 
 	port := "9090"
@@ -186,8 +230,10 @@ func main() {
 	log.Printf("  GET  /status\n")
 	log.Printf("  POST /signaling/start\n")
 	log.Printf("  POST /signaling/stop\n")
+	log.Printf("  GET  /signaling/logs\n")
 	log.Printf("  POST /client/start\n")
 	log.Printf("  POST /client/stop\n")
+	log.Printf("  GET  /client/logs\n")
 	log.Printf("  POST /pull\n")
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
