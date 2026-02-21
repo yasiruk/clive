@@ -103,17 +103,19 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	port := flag.Int("port", 8080, "Port to run signaling server on")
+	addr := flag.String("addr", ":8080", "Host:port to run signaling server on (e.g., :8080 or localhost:8080)")
 	flag.Parse()
-
-	addr := fmt.Sprintf(":%d", *port)
 
 	http.HandleFunc("/ws", handleWebSocket)
 
-	fmt.Printf("Signaling Server starting on ws://localhost%s/ws\n", addr)
+	displayAddr := *addr
+	if displayAddr[0] == ':' {
+		displayAddr = "localhost" + displayAddr
+	}
+	fmt.Printf("Signaling Server starting on ws://%s/ws\n", displayAddr)
 	fmt.Println("Connect with query parameter: /ws?room=myroom")
 
-	err := http.ListenAndServe(addr, nil)
+	err := http.ListenAndServe(*addr, nil)
 	if err != nil {
 		log.Fatal("ListenAndServe:", err)
 	}

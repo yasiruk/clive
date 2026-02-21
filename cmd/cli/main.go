@@ -29,13 +29,13 @@ type Message struct {
 
 func main() {
 	roomName := flag.String("room", "default-room", "The WebRTC room to join")
-	signalingURL := flag.String("signaling", "ws://localhost:8080/ws", "The signaling server URL")
+	serverAddr := flag.String("server", "localhost:8080", "The signaling server host:port")
 	isCaller := flag.Bool("caller", false, "Whether this client is the caller (initiates the offer)")
 	flag.Parse()
 
 	fmt.Printf("Starting WebRTC CLI Client...\n")
 	fmt.Printf("Room: %s\n", *roomName)
-	fmt.Printf("Signaling Server: %s\n", *signalingURL)
+	fmt.Printf("Signaling Server: %s\n", *serverAddr)
 	fmt.Printf("Caller Mode: %v\n", *isCaller)
 
 	// 1. Initialize WebRTC peer connection
@@ -56,7 +56,7 @@ func main() {
 	})
 
 	// 2. Setup WebSocket signaling
-	wsURL := fmt.Sprintf("%s?room=%s", *signalingURL, *roomName)
+	wsURL := fmt.Sprintf("ws://%s/ws?room=%s", *serverAddr, *roomName)
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		log.Fatalf("Failed to connect to signaling server: %v", err)
