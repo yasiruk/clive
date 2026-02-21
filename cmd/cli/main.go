@@ -10,8 +10,10 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media/ivfwriter"
@@ -31,7 +33,8 @@ type Message struct {
 }
 
 func spawnFFplayView(title string, getNextPacket func() (*rtp.Packet, error)) {
-	cmd := exec.Command("ffplay", "-i", "pipe:0", "-window_title", title, "-loglevel", "error")
+	cmd := exec.Command("ffplay", "-i", "pipe:0", "-window_title", title, "-loglevel", "warning")
+	cmd.Stderr = os.Stderr // Pipe ffplay's stderr to our CLI so we can debug
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		fmt.Println("Failed to create stdin pipe for ffplay:", err)
@@ -199,6 +202,18 @@ func main() {
 
 		if track.Kind() == webrtc.RTPCodecTypeVideo {
 			fmt.Println("Spawning window for remote video feed...")
+
+			// Request a keyframe (PLI) every 3 seconds to ensure ffplay starts decoding
+			go func() {
+				ticker := time.NewTicker(time.Second * 3)
+				for range ticker.C {
+					if rtcpErr := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(track.SSRC())}}); rtcpErr != nil {
+						fmt.Println("Failed to send PLI:", rtcpErr)
+						return
+					}
+				}
+			}()
+
 			spawnFFplayView("Remote Video", func() (*rtp.Packet, error) {
 				pkt, _, readErr := track.ReadRTP()
 				return pkt, readErr
