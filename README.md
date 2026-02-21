@@ -27,19 +27,19 @@ To establish a peer-to-peer connection, you need to run the signaling server and
 
 **1. Start the signaling server:**
 ```bash
-./signaling-server -port 8080
+./signaling-server -addr :8080
 ```
 
 **2. Start the Receiver:**
 Open a new terminal and run the CLI client in receiver mode (waits for an offer):
 ```bash
-./clive-cli -room my-room -caller=false
+./clive-cli -room my-room -server localhost:8080 -caller=false
 ```
 
 **3. Start the Caller:**
 Open another terminal and run the CLI client in caller mode (initiates the offer):
 ```bash
-./clive-cli -room my-room -caller=true
+./clive-cli -room my-room -server localhost:8080 -caller=true
 ```
 
 Once both clients are running, they will connect through the signaling server, negotiate the WebRTC connection, and begin sharing audio/video tracks.
