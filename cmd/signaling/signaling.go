@@ -63,9 +63,22 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	room.mu.Lock()
 	room.Clients[conn] = true
+	clientCount := len(room.Clients)
 	room.mu.Unlock()
 
-	log.Printf("Client connected to room: %s. Total clients: %d\n", roomName, len(room.Clients))
+	log.Printf("Client connected to room: %s. Total clients: %d\n", roomName, clientCount)
+
+	if clientCount > 1 {
+		// Notify EVERYONE in the room that we are ready to communicate
+		msg := Message{Type: "peer-ready"}
+		msgBytes, _ := json.Marshal(msg)
+
+		room.mu.Lock()
+		for client := range room.Clients {
+			client.WriteMessage(websocket.TextMessage, msgBytes)
+		}
+		room.mu.Unlock()
+	}
 
 	defer func() {
 		room.mu.Lock()

@@ -254,6 +254,7 @@ func main() {
 	})
 
 	// 6. Signaling Loop
+	hasInitiated := false
 	go func() {
 		for {
 			var msg Message
@@ -263,6 +264,27 @@ func main() {
 			}
 
 			switch msg.Type {
+			case "peer-ready":
+				if *isCaller {
+					if !hasInitiated {
+						fmt.Println("Peer is ready. Initiating call (creating offer)...")
+						hasInitiated = true
+						offer, err := peerConnection.CreateOffer(nil)
+						if err != nil {
+							log.Printf("Failed to create offer: %v\n", err)
+							continue
+						}
+						if err := peerConnection.SetLocalDescription(offer); err != nil {
+							log.Printf("Failed to set local description: %v\n", err)
+							continue
+						}
+						offerData, _ := json.Marshal(offer)
+						writeJSON(Message{Type: "offer", Data: offerData})
+					}
+				} else {
+					fmt.Println("Peer is ready. Waiting for offer...")
+				}
+
 			case "offer":
 				fmt.Println("Received offer, setting remote description")
 				var offer webrtc.SessionDescription
@@ -318,21 +340,7 @@ func main() {
 		}
 	}()
 
-	// If we are the caller, send an offer immediately after connecting.
-	if *isCaller {
-		fmt.Println("Initiating call (creating offer)...")
-		offer, err := peerConnection.CreateOffer(nil)
-		if err != nil {
-			log.Fatalf("Failed to create offer: %v\n", err)
-		}
-		if err := peerConnection.SetLocalDescription(offer); err != nil {
-			log.Fatalf("Failed to set local description: %v\n", err)
-		}
-		offerData, _ := json.Marshal(offer)
-		writeJSON(Message{Type: "offer", Data: offerData})
-	}
-
-	fmt.Println("WebRTC Client is running. Press Ctrl+C to exit.")
+	fmt.Println("WebRTC Client is running. Waiting for peers...")
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
