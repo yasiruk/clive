@@ -255,6 +255,8 @@ func main() {
 
 	// 6. Signaling Loop
 	hasInitiated := false
+	var pendingCandidates []webrtc.ICECandidateInit
+
 	go func() {
 		for {
 			var msg Message
@@ -298,6 +300,14 @@ func main() {
 					continue
 				}
 
+				// Apply any queued candidates
+				for _, c := range pendingCandidates {
+					if err := peerConnection.AddICECandidate(c); err != nil {
+						log.Println("Failed to add queued ICE candidate:", err)
+					}
+				}
+				pendingCandidates = nil
+
 				fmt.Println("Creating answer...")
 				answer, err := peerConnection.CreateAnswer(nil)
 				if err != nil {
@@ -326,6 +336,14 @@ func main() {
 					continue
 				}
 
+				// Apply any queued candidates
+				for _, c := range pendingCandidates {
+					if err := peerConnection.AddICECandidate(c); err != nil {
+						log.Println("Failed to add queued ICE candidate:", err)
+					}
+				}
+				pendingCandidates = nil
+
 			case "candidate":
 				var candidate webrtc.ICECandidateInit
 				if err := json.Unmarshal(msg.Data, &candidate); err != nil {
@@ -333,8 +351,13 @@ func main() {
 					continue
 				}
 
-				if err := peerConnection.AddICECandidate(candidate); err != nil {
-					log.Println("Failed to add ICE candidate:", err)
+				if peerConnection.RemoteDescription() == nil {
+					// Queue candidate if remote description is not set yet
+					pendingCandidates = append(pendingCandidates, candidate)
+				} else {
+					if err := peerConnection.AddICECandidate(candidate); err != nil {
+						log.Println("Failed to add ICE candidate:", err)
+					}
 				}
 			}
 		}
