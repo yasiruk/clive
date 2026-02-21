@@ -87,7 +87,7 @@ func main() {
 		}
 	})
 
-	// 3. Initialize mediadevices to capture local audio/video feeds
+	// 3. Initialize mediadevices to capture local audio/video feeds (optional)
 	fmt.Println("Requesting camera and microphone access...")
 	vpxParams, _ := vpx.NewVP8Params()
 	opusParams, _ := opus.NewParams()
@@ -107,24 +107,25 @@ func main() {
 		Codec: codecSelector,
 	})
 	if err != nil {
-		log.Fatalf("Failed to get user media: %v\n", err)
-	}
+		fmt.Printf("Warning: Failed to get user media: %v\n", err)
+		fmt.Println("Continuing without local audio/video (receive-only mode)")
+	} else {
+		// 4. Add local tracks to PeerConnection
+		for _, track := range mediaStream.GetTracks() {
+			track.OnEnded(func(err error) {
+				fmt.Printf("Track ended: %v\n", err)
+			})
 
-	// 4. Add local tracks to PeerConnection
-	for _, track := range mediaStream.GetTracks() {
-		track.OnEnded(func(err error) {
-			fmt.Printf("Track ended: %v\n", err)
-		})
-
-		_, err = peerConnection.AddTransceiverFromTrack(track,
-			webrtc.RTPTransceiverInit{
-				Direction: webrtc.RTPTransceiverDirectionSendrecv,
-			},
-		)
-		if err != nil {
-			log.Fatalf("Failed to add track: %v\n", err)
+			_, err = peerConnection.AddTransceiverFromTrack(track,
+				webrtc.RTPTransceiverInit{
+					Direction: webrtc.RTPTransceiverDirectionSendrecv,
+				},
+			)
+			if err != nil {
+				log.Fatalf("Failed to add track: %v\n", err)
+			}
+			fmt.Printf("Added local track: %s\n", track.Kind().String())
 		}
-		fmt.Printf("Added local track: %s\n", track.Kind().String())
 	}
 
 	// 5. Handle remote tracks
