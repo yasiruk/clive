@@ -32,6 +32,29 @@ type Message struct {
 	Data json.RawMessage `json:"data"`
 }
 
+// Track all spawned child processes so we can kill them on shutdown
+var (
+	childProcs   []*exec.Cmd
+	childProcsMu sync.Mutex
+)
+
+func trackChildProcess(cmd *exec.Cmd) {
+	childProcsMu.Lock()
+	defer childProcsMu.Unlock()
+	childProcs = append(childProcs, cmd)
+}
+
+func killAllChildProcesses() {
+	childProcsMu.Lock()
+	defer childProcsMu.Unlock()
+	for _, cmd := range childProcs {
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+	}
+	childProcs = nil
+}
+
 func spawnFFplayView(title string, getNextPacket func() (*rtp.Packet, error)) {
 	cmd := exec.Command("ffplay", "-i", "pipe:0", "-window_title", title, "-loglevel", "warning")
 	cmd.Stderr = os.Stderr // Pipe ffplay's stderr to our CLI so we can debug
@@ -44,6 +67,8 @@ func spawnFFplayView(title string, getNextPacket func() (*rtp.Packet, error)) {
 		fmt.Println("Failed to start ffplay (is ffmpeg installed?):", err)
 		return
 	}
+
+	trackChildProcess(cmd)
 
 	ivf, err := ivfwriter.NewWith(stdin)
 	if err != nil {
@@ -370,4 +395,5 @@ func main() {
 	<-sigChan
 
 	fmt.Println("Shutting down...")
+	killAllChildProcesses()
 }

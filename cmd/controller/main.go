@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 type ManagedProcess struct {
@@ -26,6 +27,7 @@ func (m *ManagedProcess) Start(logFile string, name string, args ...string) erro
 	}
 
 	m.cmd = exec.Command(name, args...)
+	m.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	var f *os.File
 	if logFile != "" {
@@ -75,7 +77,13 @@ func (m *ManagedProcess) Stop() error {
 		return fmt.Errorf("process not running")
 	}
 
-	if err := m.cmd.Process.Kill(); err != nil {
+	// Kill the entire process group (parent + all children like ffplay)
+	pgid, err := syscall.Getpgid(m.cmd.Process.Pid)
+	if err != nil {
+		// Fallback to killing just the process
+		return m.cmd.Process.Kill()
+	}
+	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
 		return err
 	}
 
