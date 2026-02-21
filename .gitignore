@@ -6,6 +6,8 @@
 *.dylib
 /cli
 /signaling
+/clive-cli
+/signaling-server
 
 # Test binary, built with `go test -c`
 *.test
