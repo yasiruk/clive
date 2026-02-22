@@ -89,11 +89,18 @@ static void on_pad_added(GstElement *element, GstPad *pad, gpointer user_data) {
     const gchar *name = gst_structure_get_name(str);
 
     GstElement *sink = NULL;
-    // Simple logic: if video, show window. if audio, play sound.
+    
+    // Check media type (video or audio)
     if (g_str_has_prefix(name, "video")) {
-        sink = gst_parse_bin_from_description("videoconvert ! autovideosink", TRUE, NULL);
+        // Incoming video is RTP VP8 -> depayload -> decode -> display
+        sink = gst_parse_bin_from_description(
+            "rtpvp8depay ! vp8dec ! videoconvert ! videoscale ! autovideosink", 
+            TRUE, NULL);
     } else if (g_str_has_prefix(name, "audio")) {
-        sink = gst_parse_bin_from_description("audioconvert ! autoaudiosink", TRUE, NULL);
+        // Incoming audio is RTP Opus -> depayload -> decode -> play
+        sink = gst_parse_bin_from_description(
+            "rtpopusdepay ! opusdec ! audioconvert ! audioresample ! autoaudiosink", 
+            TRUE, NULL);
     }
 
     if (sink) {
