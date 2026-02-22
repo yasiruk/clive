@@ -1,7 +1,7 @@
 #pragma once
 
 #include <libsoup/soup.h>
-#include <json-glib/json-glib.h>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <functional>
 #include <memory>
@@ -39,7 +39,7 @@ public:
     void send_candidate(const std::string& candidate, int sdp_mline_index);
 
 private:
-    void send_message(const std::string& type, JsonNode* data_node);
+    void send_message(const std::string& type, const nlohmann::json& data = nullptr);
     
     // Internal static callbacks for libsoup/glib
     static void on_connection_created(GObject* source, GAsyncResult* res, gpointer user_data);

@@ -2,6 +2,8 @@
 #include <iostream>
 #include <cstring>
 
+using json = nlohmann::json;
+
 SignalingClient::SignalingClient(Callbacks callbacks)
     : session_(nullptr), ws_conn_(nullptr), callbacks_(callbacks) {
 }
@@ -30,68 +32,36 @@ void SignalingClient::close() {
     }
 }
 
-void SignalingClient::send_message(const std::string& type, JsonNode* data_node) {
+void SignalingClient::send_message(const std::string& type, const json& data) {
     if (!ws_conn_) return;
 
-    JsonBuilder* builder = json_builder_new();
-    json_builder_begin_object(builder);
-    json_builder_set_member_name(builder, "type");
-    json_builder_add_string_value(builder, type.c_str());
-    json_builder_set_member_name(builder, "data");
-    json_builder_add_value(builder, data_node ? json_node_copy(data_node) : json_node_new(JSON_NODE_NULL));
-    json_builder_end_object(builder);
+    json j;
+    j["type"] = type;
+    if (!data.is_null()) {
+        j["data"] = data;
+    } else {
+        j["data"] = nullptr;
+    }
 
-    JsonGenerator* gen = json_generator_new();
-    json_generator_set_root(gen, json_builder_get_root(builder));
-    gchar* text = json_generator_to_data(gen, NULL);
-
-    soup_websocket_connection_send_text(ws_conn_, text);
-
-    g_free(text);
-    g_object_unref(gen);
-    g_object_unref(builder);
+    std::string text = j.dump();
+    soup_websocket_connection_send_text(ws_conn_, text.c_str());
 }
 
 void SignalingClient::send_offer(const std::string& sdp) {
-    JsonBuilder* builder = json_builder_new();
-    json_builder_begin_object(builder);
-    json_builder_set_member_name(builder, "type");
-    json_builder_add_string_value(builder, "offer");
-    json_builder_set_member_name(builder, "sdp");
-    json_builder_add_string_value(builder, sdp.c_str());
-    json_builder_end_object(builder);
-    
-    JsonNode* data_node = json_builder_get_root(builder);
-    send_message("offer", data_node);
-    g_object_unref(builder);
+    json data = {{"sdp", sdp}};
+    send_message("offer", {{"sdp", sdp}});
 }
 
 void SignalingClient::send_answer(const std::string& sdp) {
-    JsonBuilder* builder = json_builder_new();
-    json_builder_begin_object(builder);
-    json_builder_set_member_name(builder, "type");
-    json_builder_add_string_value(builder, "answer");
-    json_builder_set_member_name(builder, "sdp");
-    json_builder_add_string_value(builder, sdp.c_str());
-    json_builder_end_object(builder);
-    
-    JsonNode* data_node = json_builder_get_root(builder);
-    send_message("answer", data_node);
-    g_object_unref(builder);
+    send_message("answer", {{"sdp", sdp}});
 }
 
 void SignalingClient::send_candidate(const std::string& candidate, int sdp_mline_index) {
-    JsonBuilder* builder = json_builder_new();
-    json_builder_begin_object(builder);
-    json_builder_set_member_name(builder, "candidate");
-    json_builder_add_string_value(builder, candidate.c_str());
-    json_builder_set_member_name(builder, "sdpMLineIndex");
-    json_builder_add_int_value(builder, sdp_mline_index);
-    json_builder_end_object(builder);
-    
-    JsonNode* root = json_builder_get_root(builder);
-    send_message("candidate", root);
-    g_object_unref(builder);
+    json data = {
+        {"candidate", candidate},
+        {"sdpMLineIndex", sdp_mline_index}
+    };
+    send_message("candidate", data);
 }
 
 void SignalingClient::on_connection_created(GObject* source, GAsyncResult* res, gpointer user_data) {
@@ -121,43 +91,34 @@ void SignalingClient::on_ws_message(SoupWebsocketConnection* conn, gint type, GB
     gsize len;
     const char* data = (const char*)g_bytes_get_data(message, &len);
     
-    JsonParser* parser = json_parser_new();
-    if (!json_parser_load_from_data(parser, data, len, nullptr)) {
+    try {
+        json j = json::parse(data, data + len);
+        std::string msg_type = j.value("type", "");
+
+        if (msg_type == "peer-ready") {
+            if (self->callbacks_.on_peer_ready) self->callbacks_.on_peer_ready();
+        } else if (msg_type == "offer") {
+            if (j.contains("data")) {
+                std::string sdp = j["data"].value("sdp", "");
+                if (self->callbacks_.on_offer) self->callbacks_.on_offer(sdp);
+            }
+        } else if (msg_type == "answer") {
+            if (j.contains("data")) {
+                std::string sdp = j["data"].value("sdp", "");
+                if (self->callbacks_.on_answer) self->callbacks_.on_answer(sdp);
+            }
+        } else if (msg_type == "candidate") {
+            if (j.contains("data")) {
+                std::string candidate = j["data"].value("candidate", "");
+                int mline_index = j["data"].value("sdpMLineIndex", 0);
+                if (self->callbacks_.on_candidate) self->callbacks_.on_candidate(candidate, mline_index);
+            }
+        }
+    } catch (json::parse_error& e) {
         if (self->callbacks_.on_error) {
-            self->callbacks_.on_error("Failed to parse JSON");
-        }
-        g_object_unref(parser);
-        return;
-    }
-
-    JsonNode* root = json_parser_get_root(parser);
-    JsonObject* obj = json_node_get_object(root);
-    const gchar* msg_type = json_object_get_string_member(obj, "type");
-    
-    if (g_strcmp0(msg_type, "peer-ready") == 0) {
-        if (self->callbacks_.on_peer_ready) self->callbacks_.on_peer_ready();
-    } else if (g_strcmp0(msg_type, "offer") == 0) {
-        if (json_object_has_member(obj, "data")) {
-            JsonObject* data_obj = json_object_get_object_member(obj, "data");
-            const gchar* sdp = json_object_get_string_member(data_obj, "sdp");
-            if (self->callbacks_.on_offer) self->callbacks_.on_offer(sdp);
-        }
-    } else if (g_strcmp0(msg_type, "answer") == 0) {
-        if (json_object_has_member(obj, "data")) {
-            JsonObject* data_obj = json_object_get_object_member(obj, "data");
-            const gchar* sdp = json_object_get_string_member(data_obj, "sdp");
-            if (self->callbacks_.on_answer) self->callbacks_.on_answer(sdp);
-        }
-    } else if (g_strcmp0(msg_type, "candidate") == 0) {
-        if (json_object_has_member(obj, "data")) {
-            JsonObject* data_obj = json_object_get_object_member(obj, "data");
-            const gchar* candidate = json_object_get_string_member(data_obj, "candidate");
-            gint mline_index = json_object_get_int_member(data_obj, "sdpMLineIndex");
-            if (self->callbacks_.on_candidate) self->callbacks_.on_candidate(candidate, mline_index);
+            self->callbacks_.on_error(std::string("Failed to parse JSON: ") + e.what());
         }
     }
-
-    g_object_unref(parser);
 }
 
 void SignalingClient::on_ws_closed(SoupWebsocketConnection* conn, gpointer user_data) {
